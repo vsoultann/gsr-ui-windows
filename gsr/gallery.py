@@ -45,27 +45,57 @@ class Clip:
         self.game = ""
 
 
-def scan(cfg):
-    """Clips in the configured save folders (and their per-game subfolders), newest first."""
+def nvidia_capture_dir():
+    """Where NVIDIA (ShadowPlay / NVIDIA app) saves clips: its configured folder, else Videos/NVIDIA."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\NVIDIA Corporation\Global\ShadowPlay\NVSPCAPS") as k:
+            raw, _ = winreg.QueryValueEx(k, "DefaultPathW")
+        path = raw.decode("utf-16-le").split("\0", 1)[0].strip() if isinstance(raw, bytes) else str(raw).strip()
+        if path:
+            return Path(path)
+    except (OSError, UnicodeDecodeError):
+        pass
+    return Path(os.path.expanduser("~")) / "Videos" / "NVIDIA"
+
+
+def _nvidia_kind(p):
+    """NVIDIA names clips '<Game> <date>.DVR.mp4' (instant replay) or '<Game> <date>.mp4' (recording)."""
+    if p.suffix.lower() in IMAGE_EXT:
+        return "screenshot"
+    return "replay" if ".dvr." in p.name.lower() else "record"
+
+
+def scan(cfg, nvidia_dir=None):
+    """Clips in the configured save folders and NVIDIA's capture folder (plus per-game subfolders),
+    newest first."""
     roots = {cfg["replay"]["save_directory"], cfg["record"]["save_directory"], cfg["screenshot"]["save_directory"]}
+    nvidia = Path(nvidia_dir) if nvidia_dir else nvidia_capture_dir()
+    sources = [(Path(r), False) for r in roots] + [(nvidia, True)]
     clips, seen = [], set()
-    for root in roots:
-        root = Path(root)
+    for root, is_nvidia in sources:
         if not root.is_dir():
             continue
         for pattern in ("*", "*/*"):
             for p in root.glob(pattern):
-                prefix = p.name.split("_", 1)[0]
                 ext = p.suffix.lower()
-                if prefix not in KINDS or ext not in VIDEO_EXT | IMAGE_EXT or p in seen:
+                if ext not in VIDEO_EXT | IMAGE_EXT or p in seen:
                     continue
+                if is_nvidia:
+                    kind = _nvidia_kind(p)
+                else:
+                    prefix = p.name.split("_", 1)[0]
+                    if prefix not in KINDS:
+                        continue
+                    kind = KINDS[prefix]
                 try:
                     st = p.stat()
                 except OSError:
                     continue
-                if st.st_size > 0:
+                if st.st_size > 0 and p.is_file():
                     seen.add(p)
-                    clip = Clip(p, KINDS[prefix], st)
+                    clip = Clip(p, kind, st)
                     clip.game = p.parent.name if p.parent != root else ""   # per-game subfolder
                     clips.append(clip)
     clips.sort(key=lambda c: c.mtime, reverse=True)

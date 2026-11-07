@@ -4,6 +4,7 @@
 """
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -14,6 +15,7 @@ from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPixmap  # 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from gsr import gallery, hotkeys, overlay, pages  # noqa: E402
+gallery.nvidia_capture_dir = lambda: Path(tempfile.mkdtemp())   # never show the real NVIDIA clips
 from gsr.gui import Event, Win, theme  # noqa: E402
 
 out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "render_out")

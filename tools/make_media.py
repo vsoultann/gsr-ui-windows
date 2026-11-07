@@ -22,6 +22,7 @@ from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPixmap, QP
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from gsr import config, gallery, gui, hotkeys, overlay, pages, system  # noqa: E402
+gallery.nvidia_capture_dir = lambda: Path(tempfile.mkdtemp())   # never show the real NVIDIA clips
 from gsr.gui import Event, Win, color_theme, theme  # noqa: E402
 from gsr.notify import Notification  # noqa: E402
 

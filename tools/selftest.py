@@ -93,12 +93,23 @@ for name in ("Replay_a.mp4", "Video_b.mkv", "Screenshot_c.jpg", "notes.txt", "Re
 cfg = config.defaults()
 for k in ("replay", "record", "screenshot"):
     cfg[k]["save_directory"] = str(root)
-clips = gallery.scan(cfg)
+empty_nv = Path(tempfile.mkdtemp())
+clips = gallery.scan(cfg, nvidia_dir=empty_nv)
 check("gallery finds clips", sorted(c.path.name for c in clips) == ["Replay_a.mp4", "Replay_d.mp4", "Screenshot_c.jpg", "Video_b.mkv"],
       [c.path.name for c in clips])
 check("gallery newest first", clips[0].path.name == "Replay_d.mp4")
 check("gallery game folder", next(c for c in clips if c.path.name == "Replay_d.mp4").game == "Game")
 check("gallery kinds", {c.kind for c in clips} == {"replay", "record", "screenshot"})
+nv = Path(tempfile.mkdtemp())
+(nv / "Counter-strike 2").mkdir()
+for name in ("Counter-strike 2/Counter-strike 2 2026.06.18 - 18.29.51.03.DVR.mp4",
+             "Counter-strike 2/Counter-strike 2 2026.06.18 - 18.30.00.04.mp4", "Desktop 2026.01.01.png"):
+    (nv / name).write_bytes(b"data")
+nclips = {c.path.name: c for c in gallery.scan(cfg, nvidia_dir=nv)}
+check("gallery includes nvidia clips", len(nclips) == 7, list(nclips))
+check("nvidia DVR is replay", nclips["Counter-strike 2 2026.06.18 - 18.29.51.03.DVR.mp4"].kind == "replay")
+check("nvidia recording", nclips["Counter-strike 2 2026.06.18 - 18.30.00.04.mp4"].kind == "record")
+check("nvidia game folder", nclips["Counter-strike 2 2026.06.18 - 18.30.00.04.mp4"].game == "Counter-strike 2")
 check("fmt_time", gallery.fmt_time(62) == "1:02" and gallery.fmt_time(3725) == "1:02:05")
 
 # widgets

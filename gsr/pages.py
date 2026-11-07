@@ -808,10 +808,6 @@ class GlobalSettingsPage(StaticPage):
         lst = List(V)
         lst.set_spacing(0.018)
 
-        self.tint_radio = RadioButton("body", RadioButton.HORIZONTAL)
-        self.tint_radio.add_item(TR("Red"), "amd")
-        self.tint_radio.add_item(TR("Green"), "nvidia")
-        self.tint_radio.add_item(TR("Blue"), "intel")
         self.swatches = gui.ColorSwatches(list(gui.TINTS.items()))
         self.custom_tint = entry("", 4)
         self.custom_tint.max_width = 2.0 * fsize() * 4.5
@@ -819,13 +815,8 @@ class GlobalSettingsPage(StaticPage):
         def set_tint(value):
             color_theme.tint_color = gui.parse_tint(value)
             self.cfg["main"]["tint_color"] = value
-            self.tint_radio.selected_item = {"amd": 0, "nvidia": 1, "intel": 2}.get(value, -1)
             self.swatches.selected = value if value in gui.TINTS else None
 
-        def tint_changed(_, id_):
-            set_tint(id_)
-            return True
-        self.tint_radio.on_selection_changed = tint_changed
         self.swatches.on_select = set_tint
 
         def custom_changed(text):
@@ -834,7 +825,7 @@ class GlobalSettingsPage(StaticPage):
                 set_tint("#" + v.lower())
         self._custom_changed = custom_changed
         self.custom_tint.on_changed = custom_changed
-        appearance = vlist(label(TR("Accent color")), self.tint_radio, self.swatches,
+        appearance = vlist(label(TR("Accent color")), self.swatches,
                            hlist(label(TR("Custom color (hex):")), self.custom_tint, center=True))
         lst.add_widget(Subsection(TR("Appearance"), appearance, sw))
 
@@ -943,7 +934,6 @@ class GlobalSettingsPage(StaticPage):
 
     def load(self):
         tint = self.cfg["main"]["tint_color"] or self.app.default_tint_name()
-        self.tint_radio.selected_item = {"amd": 0, "nvidia": 1, "intel": 2}.get(tint, -1)
         self.swatches.selected = tint if tint in gui.TINTS else None
         if tint.startswith("#"):
             self.custom_tint.on_changed = None

@@ -40,9 +40,11 @@ accent colors.
 - Multiple audio tracks: any output device (loopback) and any microphone, mixed per track
 - Webcam overlay with drag-to-place preview
 - **Gallery**: browse saved replays, recordings and screenshots as thumbnails, filter by type, and play
-  them inside the overlay (seek bar, Space to pause, arrow keys to skip 5 s); delete goes to the Recycle Bin
-- **Accent colors**: upstream's Red/Green/Blue plus purple, pink, orange, yellow, cyan, teal, white, or any
-  `#rrggbb` color (Settings → Appearance)
+  them inside the overlay (seek bar, Space to pause, arrow keys to skip 5 s); delete goes to the Recycle Bin.
+  Clips saved by NVIDIA ShadowPlay / the NVIDIA app show up too (read from its configured capture folder,
+  `Videos\NVIDIA` by default)
+- **Accent colors**: pick a color box (red, green, blue, purple, pink, orange, yellow, cyan, teal, white) or
+  type any `#rrggbb` color (Settings → Appearance)
 - gsr-notify style notifications, global hotkeys, autostart, start replay on launch / when a game starts
 - Translations from upstream
 
