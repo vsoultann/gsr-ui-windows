@@ -16,6 +16,9 @@ from gsr import config, system  # noqa: E402
 
 
 def main():
+    if "uninstall" in sys.argv[1:]:
+        from gsr import uninstall
+        return uninstall.main()
     show_event = system.single_instance()
     if show_event is None:
         return  # another instance is running; it has been asked to open its UI

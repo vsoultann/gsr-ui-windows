@@ -7,3 +7,6 @@ gsr/icon.ico
 _ref/
 tools/_dbg/
 dist-new/
+build-installer/
+dist-installer/
+installer/_stage/

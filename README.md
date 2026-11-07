@@ -53,9 +53,13 @@ accent colors.
 
 ## Install
 
-Download the latest release, extract it and run `GPU Screen Recorder.exe`.
-Run it with `launch-daemon` to start hidden in the background (this is what "Start on system startup" uses);
-press **Alt+Z** to open the UI.
+Download **`GPU-Screen-Recorder-Setup.exe`** from the [latest release](https://github.com/vsoultann/gsr-ui-windows/releases/latest)
+and run it. It installs for your user only (no admin prompt) to `%LOCALAPPDATA%\Programs\GPU Screen Recorder`,
+adds a Start Menu shortcut and optionally a desktop shortcut and start with Windows. Uninstall from
+Settings → Apps; your clips and settings are kept.
+
+Prefer no installer? Download the zip instead, extract it and run `GPU Screen Recorder.exe`.
+Run it with `launch-daemon` to start hidden in the background; press **Alt+Z** to open the UI.
 
 Clips are saved to your Videos folder (`Replay_*.mp4`, `Video_*.mp4`), screenshots to Pictures.
 
@@ -80,6 +84,12 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 Produces `dist\GPU Screen Recorder\` with `ffmpeg.exe` bundled.
+
+```
+powershell -ExecutionPolicy Bypass -File build_installer.ps1
+```
+
+Builds the app, then `dist-installer\GPU-Screen-Recorder-Setup.exe` (`installer/installer.py`).
 
 ## How it works
 
