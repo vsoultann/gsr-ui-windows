@@ -384,6 +384,10 @@ class SettingsPage(StaticPage):
             self.codec_box.add_item(TR("AV1"), "av1")
         if sup.get("h264_software"):
             self.codec_box.add_item(TR("H264 Software Encoder (Slow, not recommended)"), "h264_software")
+        if sup.get("nvenc"):
+            self.codec_box.add_item("H264 (NVIDIA NVENC)", "nvenc_h264")
+            if sup.get("nvenc_hevc"):
+                self.codec_box.add_item("HEVC (NVIDIA NVENC)", "nvenc_hevc")
         self.codec_list = vlist(label(TR("Video codec:")), self.codec_box)
 
         self.fps_entry = entry("60", 3)

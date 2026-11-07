@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import wintypes
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRectF, Qt, QUrl
+from PySide6.QtCore import QObject, QRectF, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
 
@@ -298,7 +298,15 @@ class GalleryPage(StaticPage):
 
 
 class MediaPlayer(QObject):
-    """QMediaPlayer whose frames are painted by our own widget instead of a video window."""
+    """QMediaPlayer whose frames are painted by our own widget instead of a video window.
+
+    Turning a decoded frame into a QImage costs ~5 ns per pixel (10-15 ms for a 1080p frame), more
+    than a 120/144 fps frame lasts. Doing it in the frame signal stalled the decoder and the UI, so
+    frames are converted on a worker thread: only the newest one, at most DISPLAY_FPS times a
+    second (the overlay repaints at 60 Hz), and tagged with the clip generation so a late frame
+    from the previous clip can never show up on the next one.
+    """
+    DISPLAY_FPS = 60
 
     def __init__(self):
         super().__init__()
@@ -307,23 +315,55 @@ class MediaPlayer(QObject):
         self.sink = QVideoSink()
         self.player.setAudioOutput(self.audio)
         self.player.setVideoSink(self.sink)
-        self.frame = None
+        self.frame = None          # newest converted QImage, read by the paint code
+        self.converted = 0
+        self._gen = 0
+        self._pending = None       # (generation, QVideoFrame)
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
         self.sink.videoFrameChanged.connect(self._on_frame)
+        threading.Thread(target=self._convert_loop, daemon=True, name="frame-convert").start()
 
     def _on_frame(self, frame):
-        img = frame.toImage()
-        if not img.isNull():
-            self.frame = img
+        if frame.isValid():
+            with self._lock:
+                self._pending = (self._gen, frame)
+            self._wake.set()
+
+    def _convert_loop(self):
+        interval = 1.0 / self.DISPLAY_FPS
+        while True:
+            self._wake.wait()
+            self._wake.clear()
+            with self._lock:
+                job, self._pending = self._pending, None
+            if job is None:
+                continue
+            started = time.perf_counter()
+            img = job[1].toImage()
+            with self._lock:
+                if job[0] == self._gen and not img.isNull():
+                    self.frame = img
+                    self.converted += 1
+            rest = interval - (time.perf_counter() - started)
+            if rest > 0:
+                time.sleep(rest)
+
+    def _reset(self):
+        with self._lock:
+            self._gen += 1
+            self._pending = None
+            self.frame = None
 
     def open(self, path):
-        self.frame = None
+        self._reset()
         self.player.setSource(QUrl.fromLocalFile(str(path)))
         self.player.play()
 
     def close(self):
         self.player.stop()
         self.player.setSource(QUrl())
-        self.frame = None
+        self._reset()
 
     def playing(self):
         return self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
@@ -507,9 +547,20 @@ class PlayerPage(StaticPage):
                 btn.set_text(TR("Confirm delete"))
                 threading.Timer(3.0, self._cancel_delete).start()
                 return
+            if getattr(self, "_deleting", False):
+                return
+            self._deleting = True
             self.media.close()
-            if recycle(self.clip.path):
-                self.gallery.remove_clip(self.clip)
+            self._delete(0)
+
+    def _delete(self, attempt):
+        """The player can hold the file for a moment after closing, so retry briefly before giving up."""
+        if recycle(self.clip.path) or not self.clip.path.exists():
+            self.gallery.remove_clip(self.clip)
+        elif attempt < 20:
+            QTimer.singleShot(100, lambda: self._delete(attempt + 1))
+            return
+        if self.page_stack.top() is self:
             self.page_stack.pop()
 
     def _cancel_delete(self):

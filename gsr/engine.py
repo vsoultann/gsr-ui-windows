@@ -54,12 +54,19 @@ def supported_codecs(output, caps):
     if not any(res.values()):
         res = {c: any(encoder_name(f, c) in caps for f in fams) for c in ("h264", "hevc", "av1")}
     res["h264_software"] = "libx264" in caps
+    res["nvenc"] = "h264_nvenc" in caps
+    res["nvenc_hevc"] = "hevc_nvenc" in caps
     return res
 
 
 def resolve_encoder(codec_opt, output, caps):
     if codec_opt == "h264_software":
         return "cpu", "libx264"
+    if codec_opt.startswith("nvenc_"):     # NVIDIA encoder chosen explicitly (same one ShadowPlay uses)
+        enc = codec_opt[6:] + "_nvenc"
+        if enc in caps:
+            return "nvenc", enc
+        return ("nvenc", "h264_nvenc") if "h264_nvenc" in caps else ("cpu", "libx264")
     order = ["h264", "hevc", "av1"] if codec_opt == "auto" else [codec_opt, "h264"]
     for c in order:
         for fam in families_for(output):
@@ -208,8 +215,13 @@ class Session:
         self.stream_url = stream_url
         self.stream_format = stream_format
         self.exclude_metadata = exclude_metadata
-        codec = "h264" if force_h264 else ro["video_codec"]
+        codec = ro["video_codec"]
+        if force_h264:
+            codec = "nvenc_h264" if codec.startswith("nvenc_") else "h264"
         self.family, self.encoder = resolve_encoder(codec, target.output, caps)
+        # temp files: MPEG-TS survives a crash mid-write, but it can't carry AV1 (ffmpeg stores it as
+        # unreadable private data), so AV1 uses Matroska pieces instead
+        self.part_fmt, self.part_ext = ("matroska", "mkv") if "av1" in self.encoder else ("mpegts", "ts")
         # one folder per session (pid + time) so two running instances can never mix buffers
         self.workdir = DATA_DIR / f"{kind}-{os.getpid()}-{stamp()}"
         self.started_at = None
@@ -267,9 +279,9 @@ class Session:
     def _launch(self):
         self._run += 1
         if self.kind == "replay":
-            target = self.workdir / f"r{self._run}_%03d.ts"
+            target = self.workdir / f"r{self._run}_%03d.{self.part_ext}"
         elif self.kind == "record":
-            target = self.workdir / f"part{self._run}.ts"
+            target = self.workdir / f"part{self._run}.{self.part_ext}"
             self.parts.append(target)
         else:
             target = self.stream_url
@@ -277,7 +289,9 @@ class Session:
         self._sources = [s for _, srcs in tracks for s in srcs]
         cmd = self._command(target, tracks)
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        self._logf = open(DATA_DIR / f"ffmpeg-{self.kind}.log", "w", encoding="utf-8", errors="replace")
+        # first launch starts the log; relaunches (pause/resume, recovery) append so the cause stays visible
+        self._logf = open(DATA_DIR / f"ffmpeg-{self.kind}.log", "w" if self._run == 1 else "a", encoding="utf-8",
+                          errors="replace")
         shown = [a if not (self.stream_url and a == self.stream_url) else "<stream url>" for a in cmd]
         self._logf.write(" ".join(map(str, shown)) + "\n\n")
         self._logf.flush()
@@ -310,8 +324,12 @@ class Session:
 
     def _command(self, target, tracks):
         ro = self.ro
-        cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "warning", "-progress", "pipe:1", "-stats_period", "0.05",
-               "-init_hw_device", f"d3d11va=dd:{self.target.output.adapter}", "-filter_hw_device", "dd"]
+        cmd = [self.ffmpeg, "-hide_banner", "-y", "-loglevel", "warning", "-progress", "pipe:1", "-stats_period", "0.05",
+               ]
+        if not (self.family == "nvenc" and self.target.output.vendor != system.NVIDIA):
+            # NVENC can't open on another GPU's device, so when the screen is on Intel/AMD, ddagrab makes its
+            # own device and frames reach the NVIDIA encoder through system memory
+            cmd += ["-init_hw_device", f"d3d11va=dd:{self.target.output.adapter}", "-filter_hw_device", "dd"]
         idx = 0
         # Video and every audio track get their own filtergraph: ffmpeg runs each graph on its own
         # thread, and a shared graph stalls ddagrab while it waits for real-time audio input.
@@ -355,11 +373,20 @@ class Session:
             cmd += ["-map_metadata", "-1"]
         if self.kind == "replay":
             wrap = self.replay_time // SEGMENT_SECONDS + 4
-            cmd += ["-f", "segment", "-segment_time", str(SEGMENT_SECONDS), "-segment_format", "mpegts",
+            # Matroska keeps data in memory until a piece closes; flushing small clusters keeps the
+            # piece being written readable, so a save includes the last moment before the hotkey
+            mkv_opts = ["-segment_format_options", "flush_packets=1:cluster_time_limit=100"] if self.part_fmt == "matroska" else []
+            cmd += ["-f", "segment", "-segment_time", str(SEGMENT_SECONDS), "-segment_format", self.part_fmt, *mkv_opts,
                     "-segment_wrap", str(wrap), "-reset_timestamps", "1", str(target)]
         elif self.kind == "record":
-            cmd += ["-f", "mpegts", str(target)]
+            if self.part_fmt == "matroska":
+                cmd += ["-flush_packets", "1", "-cluster_time_limit", "1000"]   # survives a crash like .ts does
+            cmd += ["-f", self.part_fmt, str(target)]
         else:
+            if self.stream_format == "flv":
+                cmd += ["-flvflags", "no_duration_filesize"]   # live: no seekable header to rewrite
+            elif self.stream_format == "mp4":
+                cmd += ["-movflags", "frag_keyframe+empty_moov+default_base_moof"]   # mp4 that can be sent live
             cmd += ["-f", self.stream_format, str(target)]
         return cmd
 
@@ -390,7 +417,14 @@ class Session:
         failures = []
         last_prune = 0.0
         while self._want:
-            time.sleep(0.5)
+            proc = self._proc
+            try:
+                if proc is not None:
+                    proc.wait(0.25)     # returns as soon as ffmpeg exits, so recovery starts immediately
+                else:
+                    time.sleep(0.25)
+            except subprocess.TimeoutExpired:
+                pass
             with self._lock:
                 if not self._want:
                     break
@@ -410,7 +444,9 @@ class Session:
                     self._want = False
                     self.error = self._log_tail() or "ffmpeg keeps exiting"
                     break
-            time.sleep(0 if switch else 1)
+            # The usual exit is the screen grab losing access (fullscreen/mode switch, UAC): restart at once so
+            # the clip only misses the restart time. Back off only when ffmpeg keeps failing.
+            time.sleep(0 if switch or len(failures) <= 1 else 1)
             with self._lock:
                 if self._want and not self.paused:
                     try:
@@ -450,7 +486,7 @@ class Session:
 
     def _prune(self):
         keep_after = time.time() - self.replay_time - 30
-        for p in self.workdir.glob("*.ts"):
+        for p in self.workdir.glob(f"*.{self.part_ext}"):
             try:
                 if p.stat().st_mtime < keep_after:
                     p.unlink()
@@ -468,12 +504,14 @@ class Session:
         seconds = min(seconds or self.replay_time, self.replay_time)
         now = time.time()
         segs = []
-        for p in self.workdir.glob("*.ts"):
+        for p in self.workdir.glob(f"*.{self.part_ext}"):
             try:
                 st = p.stat()
             except OSError:
                 continue
-            if st.st_size > 0 and st.st_mtime > now - seconds:
+            # a piece's mtime is when its last frame was written, so it covers [mtime - 2 s, mtime];
+            # take it when at least half of it is inside the requested window
+            if st.st_size > 0 and st.st_mtime > now - seconds + SEGMENT_SECONDS / 2:
                 segs.append((st.st_mtime, p))
         if not segs:
             raise RuntimeError("Replay buffer is still empty")
@@ -485,7 +523,7 @@ class Session:
 
     def clear_replay(self):
         now = time.time()
-        for p in self.workdir.glob("*.ts"):
+        for p in self.workdir.glob(f"*.{self.part_ext}"):
             try:
                 if p.stat().st_mtime < now - 0.5:
                     p.unlink()

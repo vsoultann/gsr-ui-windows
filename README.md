@@ -105,7 +105,30 @@ Builds the app, then `dist-installer\GPU-Screen-Recorder-Setup.exe` (`installer/
 
 Developer tools in `tools/`: logic self-test (`selftest.py`), offscreen UI renders (`render_test.py`,
 `notify_render.py`), README media (`make_media.py`), engine tests (`engine_test.py`), frame-timing analysis of a
-clip (`analyze_clip.py`), stall test (`stall_test.py`).
+clip (`analyze_clip.py`), stall test (`stall_test.py`), performance/quality/streaming checks (`perf_test.py`),
+player checks (`player_test.py`), whole-app CPU/RAM (`app_usage.py`), game-fps cost (`game_cost.py` with the
+offscreen GPU load `gpu_load.py`).
+
+## Performance
+
+Measured on a laptop (Intel iGPU driving the display with QSV encoding, RTX 2050, Windows 10, 1568x1080):
+
+| | CPU (whole machine) | RAM |
+|---|---|---|
+| Idle in the background | 0.2 % | 28 MB |
+| Replay buffer on, 60 fps | 0.4 % | ~200 MB (most of it is ffmpeg's GPU encoder) |
+| Recording 120 fps / 144 fps | under 0.5 % | ~210 MB |
+| NVIDIA NVENC option while the display runs on the Intel iGPU, 60 / 120 fps | 1.4 / 3.3 % | ~700 MB (frames cross GPUs through system memory; Auto/QSV is lighter here) |
+| Software x264 (not recommended) | 6-9 % | ~750 MB |
+| Playing a clip in the gallery | 2.2 % | +20 MB |
+
+- Frame rate is exact: 30/60/120/144 fps recordings have the requested number of frames with no gaps.
+- Quality presets scale as expected (about 3.8 / 6.9 / 10.8 / 15.7 Mbps at 1080p60 for medium / high /
+  very high / ultra on busy content). Custom bitrate lands within 3 % of the target on busy content;
+  static scenes use less.
+- Streaming (tested end to end over RTMP): 60 and 120 fps arrive exact, bitrate on target, AAC audio.
+- A GPU-bound test "game" showed no measurable frame-rate loss while recording (the difference was
+  smaller than run-to-run noise).
 
 ## Differences from Linux
 
@@ -121,6 +144,8 @@ clip (`analyze_clip.py`), stall test (`stall_test.py`).
 - The overlay menu and notifications show up in recordings while they are on screen: Windows 10 can't
   exclude translucent windows from capture.
 - Exclusive-fullscreen games may not be capturable and the overlay can't draw over them; use borderless windowed.
+- Alt-tabbing into or out of a fullscreen game (or a UAC prompt) makes Windows reset desktop capture.
+  The app restarts capture right away, but about 1 second around the switch is missing from the clip.
 
 ## License
 

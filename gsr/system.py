@@ -440,6 +440,7 @@ _kernel32 = ctypes.windll.kernel32
 _kernel32.CreateEventW.restype = wintypes.HANDLE
 _kernel32.CreateMutexW.restype = wintypes.HANDLE
 _kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+_kernel32.WaitForSingleObject.restype = wintypes.DWORD
 _kernel32.SetEvent.argtypes = [wintypes.HANDLE]
 
 
@@ -454,5 +455,10 @@ def single_instance():
     return event
 
 
+def wait_event_result(handle, timeout_ms):
+    """WaitForSingleObject: 0 = signalled, 0x102 = timeout, anything else = failure."""
+    return _kernel32.WaitForSingleObject(handle, timeout_ms) & 0xFFFFFFFF
+
+
 def wait_event(handle, timeout_ms):
-    return _kernel32.WaitForSingleObject(handle, timeout_ms) == 0
+    return wait_event_result(handle, timeout_ms) == 0

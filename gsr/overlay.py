@@ -398,9 +398,14 @@ class App(QObject):
             fn()
 
     def _wait_show(self, event):
+        if not event:
+            return
         while True:
-            if system.wait_event(event, 0xFFFFFFFF):
+            r = system.wait_event_result(event, 0xFFFFFFFF)
+            if r == 0:
                 self.show_requested.emit()
+            elif r != 0x102:    # WAIT_FAILED/abandoned: stop instead of spinning a core
+                return
 
     # ------------------------------------------------------------ notifications
 
@@ -1021,9 +1026,16 @@ class App(QObject):
                         ERROR_TIMEOUT, RED, RED, "record", error=True)
             return
 
+        sec = self.cfg["streaming"]
+        svc = sec["streaming_service"]
+        key = sec["custom"]["url"] if svc == "custom" else sec.get(svc, {}).get("stream_key", "")
+        if not key.strip() or (svc == "kick" and not sec["kick"]["stream_url"].strip()):
+            self.notify(TR("Unable to start streaming: the stream key/URL is empty. Set it in the streaming settings."),
+                        ERROR_TIMEOUT, RED, RED, "stream", error=True)
+            return
+
         def start(target):
             url, fmt = self._stream_url()
-            svc = self.cfg["streaming"]["streaming_service"]
             try:
                 self.stream = self._session("stream", target, stream_url=url, stream_format=fmt,
                                             force_h264=svc in ("rumble", "kick") or fmt == "flv")
